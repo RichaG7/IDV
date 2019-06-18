@@ -1,0 +1,223 @@
+---
+title: "DataScienceCapstoneIDV"
+author: "Richa Gautam"
+date: "6/10/2019"
+output:
+  html_document:
+    df_print: paged
+---
+Liver disease in India is a growing concern. Rising rates of chronic illnesses in general and poor development of public health programs have taxed caregivers. In this scenario, being able to predict the occurence of a disease, in this case liver disease, using machine learning algorithms and comprehensive health information is becoming more and more essential.
+
+The dataset contains a total of 583 cases, with 416 liver patients and 167 non-liver-patients, collected from North East of Andhra Pradesh, India. The "Dataset" column indicates "Liver patient" or "non-liver-patient." The data set contains 441 male patient records and 142 female patient records. Any patient whose age exceeded 89 is listed as being of age "90".
+
+Dataset was cleaned to exclude cases with missing values, leading to a final dataset of 414 liver patient records and 165 non-liver-patient records. This cleaned dataset contained 140 female patients and 439 male patients.
+
+Columns in Dataset:
+
+Age of the patient
+Gender of the patient
+Total Bilirubin
+Direct Bilirubin
+Alkaline Phosphotase
+Alamine Aminotransferase
+Aspartate Aminotransferase
+Total Protiens
+Albumin
+Albumin and Globulin Ratio
+Dataset
+
+```{r india, include=FALSE}
+library(tidyverse)
+library(dummies)
+library(caret)
+library(mclust)
+library(plotly)
+
+india <- read.csv("indian_liver_patient.csv", na.strings = c("", "NA"), stringsAsFactors = FALSE)
+india$Gender = factor(india$Gender, levels = c("Male", "Female"))
+india$Dataset[india$Dataset == 1] = "Liver patient"
+india$Dataset[india$Dataset == 2] = "Non-liver patient"
+india$Dataset = factor(india$Dataset, levels = c("Liver patient", "Non-liver patient"))
+india = india[complete.cases(india),]
+```
+Demographic Characteristics:
+``` {r, echo = FALSE}
+india %>% group_by(Dataset, Gender) %>% summarise(SampleSize = n()) %>% group_by(Gender) %>% mutate(Proportion = SampleSize/sum(SampleSize) *100)
+```
+Table 1. Proportion of liver patients by gender.
+
+Because the dataset has more men than women, we computed the proportion of men and women who had liver disease. We noticed that rates of liver disease are higher in men by almost 9 points. 
+
+To begin, we used an ensemble method that combined 19 different classification methods - lda, naive_bayes, svmLinear, qda, knn, kknn, rpart, rf, ranger, wsrf, Rborist, avNNet, mlp, monmlp, adaboose, gbm, svmRadial, svmRadialCost, and svmRadialSigma.
+
+```{r india, include=FALSE}
+set.seed(1)
+ind <- createDataPartition(india$Dataset, times = 1, list = FALSE)
+train <- india[-ind,]
+test <- india[ind,]
+
+model <- c("lda", "naive_bayes", "svmLinear", "qda", 
+            "knn", "kknn", "rpart", "rf", "ranger", "wsrf", 
+            "Rborist", "avNNet", "mlp", "monmlp",
+            "adaboost", "gbm", "svmRadial", 
+            "svmRadialCost", "svmRadialSigma")
+
+set.seed(1)
+fit <- lapply(model, function(model){
+  train(Dataset ~ ., method = model, data = train)
+})
+
+names(fit) <- model
+
+pred <- sapply(fit, function(fit){
+  predict(fit,test)
+})
+
+c <- c(1:ncol(pred))
+confusionvector <- sapply(c, function(c){
+  confusionMatrix(factor(pred[,c]), test$Dataset)$overall["Accuracy"]
+  })
+
+mean(confusionvector)
+
+c2 <- c(1:nrow(test))
+mv <- sapply(c2, function(c2){
+  m <- majorityVote(pred[c2,])
+  m$majority
+})
+pred <- cbind(pred,mv)
+
+cv <- confusionMatrix(factor(pred[,ncol(pred)]), test$Dataset)$overall["Accuracy"]
+cv
+```
+
+The accuracy of the individual methods were not very high, with lda leading to the highest accuracy (0.72). The ensemble's accuracy was 0.71.
+
+To see if this dataset would benefit from Principal Component Analysis and dimension reduction, we looked at the correlations of the variables to each other.
+```{r, include = FALSE}
+t = india[,1:10] %>% dummy.data.frame(name = "Gender") %>% as.matrix()
+```
+```{r, echo = FALSE}
+cor(t)
+```
+Table 2. Correlation matrix of all predictors.
+
+Predictably, the variables concerned with the same components were correlated highly - Bilirubins, Aminotransferases and Albumins. Total Protein was correlated with Albumin as well, but not with the Albumin to Globulin ratio.
+
+We then ran a principal component analysis to observe which variables were principal in categorizing patients. 
+
+```{r, include=FALSE}
+pca = train %>% dummy.data.frame(name = "Gender") %>% .[,1:10] %>% prcomp()
+summary(pca)
+```
+Table 3. Variance explained by each principal component.
+
+The first three principal components explain around 99% of the variance, and the first 7 explain all of it.
+
+```{r pressure, echo=FALSE}
+data.frame(pca$x[,1:2], Dataset=train$Dataset) %>% 
+ggplot(aes(PC1,PC2, fill = Dataset))+
+geom_point(cex=3, pch=21) +
+coord_fixed(ratio = 1)+
+labs(title = "Plot of PC1 and PC2")
+```
+Figure 1. Plot of PC1 and PC2.
+
+```{r, echo = FALSE}
+data.frame(pca$x[,2:3], Dataset=train$Dataset) %>% 
+ggplot(aes(PC2,PC3, fill = Dataset))+
+geom_point(cex=3, pch=21) +
+coord_fixed(ratio = 1)+
+labs(title = "Plot of PC2 and PC3")
+```
+Figure 2. Plot of PC2 and PC3.
+
+A combined 3D graph of the top three principal components shows that the is not a sharp demarcation between the liver patients and the non-liver patients.
+```{r}
+data.frame(pca$x[,1:3], Dataset=train$Dataset) %>%
+  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="scatter3d", color=.$Dataset, colors = c("indianred", "turquoise"))
+```
+Figure 3. Plot of PC1, PC2 and PC3.
+
+This explains the overall low accuracy. 
+
+To find out the factors that were confounding our algorithm, we ran our ensemble after removing each column. However, no single column improved the accuracy. Removal of columns 1(Age), 4(Direct_Bilirubin), 6(Alamine_Aminotransferase), 8(Total_Proteins), and 9(Albumin) decidedly lowered accuracy, suggesting that these variables were more important.
+
+```{r, include = FALSE}
+b = c(1:10)
+set.seed(1)
+iter <- sapply(b, function(b){
+  train_b = train[,-b]
+  test_b = test[,-b]
+  set.seed(1)
+  fit <- lapply(model, function(model){
+    train(Dataset ~ ., method = model, data = train_b)})
+  names(fit) <- model
+  pred <- sapply(fit, function(fit){
+    predict(fit,test_b)})
+  c <- c(1:ncol(pred))
+  confusionvector <- sapply(c, function(c){
+    confusionMatrix(factor(pred[,c]), test_b$Dataset)$overall["Accuracy"]})
+  mean(confusionvector)
+  c2 <- c(1:nrow(test_b))
+  mv <- sapply(c2, function(c2){
+    m <- majorityVote(pred[c2,])
+    m$majority})
+  pred <- cbind(pred,mv)
+  confusionMatrix(factor(pred[,ncol(pred)]), test_b$Dataset)$overall["Accuracy"]
+})
+```
+```{r, echo = FALSE}
+names(iter) <- c("Age removed", "Gender removed", "Total_Bilirubin removed", "Direct_Bilirubin removed", 
+                 "Alkaline_Phosphotase removed", "Alamine_Aminotransferase removed", "Aspartate_Aminotransferase removed",
+                 "Total_Proteins removed", "Albumin removed", "Albumin_Globulin_ratio removed")
+iter
+```
+Table 5. Accuracy after each variable is removed.
+
+However, selecting the variables with higher accuracy led to only an extremely minor increase in accuracy, from 0.71 to 0.72.
+```{r, include = FALSE}
+
+india_cleaned = india[,c(1,4,6,8,9,11)]
+train_cleaned = india_cleaned[-ind,]
+test_cleaned = india_cleaned[ind,]
+
+set.seed(1)
+fit_cleaned <- lapply(model, function(model){
+  train(Dataset ~ ., method = model, data = train_cleaned)
+})
+names(fit_cleaned) <- model
+
+pred_cleaned <- sapply(fit_cleaned, function(fit_cleaned){
+  predict(fit_cleaned,test_cleaned)
+})
+
+c3 <- c(1:ncol(pred_cleaned))
+confusionvector_cleaned <- sapply(c3, function(c3){
+  confusionMatrix(factor(pred_cleaned[,c3]), test_cleaned$Dataset)$overall["Accuracy"]
+})
+
+mean(confusionvector_cleaned)
+
+c4 <- c(1:nrow(test_cleaned))
+mv_cleaned <- sapply(c4, function(c4){
+  m <- majorityVote(pred[c4,])
+  m$majority
+})
+pred_cleaned <- cbind(pred_cleaned,mv_cleaned)
+
+cv_cleaned <- confusionMatrix(factor(pred_cleaned[,ncol(pred_cleaned)]), test_cleaned$Dataset)$overall["Accuracy"]
+cv_cleaned
+
+```
+
+
+Conclusion:
+
+Predicting liver disease from comprehensive health information is less accurate than we would hope for, but is nevertheless a useful tool that can be used to ease the burden on healthcare providers.
+
+Acknowledgements:
+
+This dataset was downloaded from the UCI ML Repository:
+Lichman, M. (2013). UCI Machine Learning Repository [http://archive.ics.uci.edu/ml]. Irvine, CA: University of California, School of Information and Computer Science.
+
