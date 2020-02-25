@@ -1,0 +1,5 @@
+"0","india %>% mutate(Gender = ifelse(GenderMale == 1, ""Male"","
+"0","                                 ifelse(GenderFemale == 1, ""Female"",0))) %>%"
+"0","  group_by(Dataset, Gender) %>% "
+"0","  summarise(SampleSize = n()) %>% group_by(Gender) %>% "
+"0","  mutate(Percentage = SampleSize/sum(SampleSize) *100)"

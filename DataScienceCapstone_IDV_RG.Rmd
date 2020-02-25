@@ -1,222 +1,212 @@
 ---
 title: "DataScienceCapstoneIDV"
 author: "Richa Gautam"
-date: "6/10/2019"
+date: "February 1st 2020"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
 ---
+#Introduction
+
 Liver disease in India is a growing concern. Rising rates of chronic illnesses in general and poor development of public health programs have taxed caregivers. In this scenario, being able to predict the occurence of a disease, in this case liver disease, using machine learning algorithms and comprehensive health information is becoming more and more essential.
 
 The dataset contains a total of 583 cases, with 416 liver patients and 167 non-liver-patients, collected from North East of Andhra Pradesh, India. The "Dataset" column indicates "Liver patient" or "non-liver-patient." The data set contains 441 male patient records and 142 female patient records. Any patient whose age exceeded 89 is listed as being of age "90".
+
+#Methods
+
+##Pre-processing
 
 Dataset was cleaned to exclude cases with missing values, leading to a final dataset of 414 liver patient records and 165 non-liver-patient records. This cleaned dataset contained 140 female patients and 439 male patients.
 
 Columns in Dataset:
 
-Age of the patient
-Gender of the patient
-Total Bilirubin
-Direct Bilirubin
-Alkaline Phosphotase
-Alamine Aminotransferase
-Aspartate Aminotransferase
-Total Protiens
-Albumin
-Albumin and Globulin Ratio
-Dataset
+1. Age of the patient
+2. Gender of the patient
+3. Total Bilirubin
+4. Direct Bilirubin
+5. Alkaline Phosphotase
+6. Alamine Aminotransferase
+7. Aspartate Aminotransferase
+8. Total Protiens
+9. Albumin
+10. Albumin and Globulin Ratio
+11. Dataset
 
-```{r india, include=FALSE}
+```{r setup, include=FALSE}
 library(tidyverse)
 library(dummies)
 library(caret)
 library(mclust)
-library(plotly)
 
 india <- read.csv("indian_liver_patient.csv", na.strings = c("", "NA"), stringsAsFactors = FALSE)
-india$Gender = factor(india$Gender, levels = c("Male", "Female"))
-india$Dataset[india$Dataset == 1] = "Liver patient"
-india$Dataset[india$Dataset == 2] = "Non-liver patient"
+india = india %>% dummy.data.frame(name = "Gender") %>% mutate(Dataset = ifelse(Dataset == 1, "Liver patient",
+                                                                                ifelse(Dataset == 2, "Non-liver patient",NA)))
 india$Dataset = factor(india$Dataset, levels = c("Liver patient", "Non-liver patient"))
 india = india[complete.cases(india),]
 ```
 Demographic Characteristics:
 ``` {r, echo = FALSE}
-india %>% group_by(Dataset, Gender) %>% summarise(SampleSize = n()) %>% group_by(Gender) %>% mutate(Proportion = SampleSize/sum(SampleSize) *100)
+india %>% mutate(Gender = ifelse(GenderMale == 1, "Male",
+                                 ifelse(GenderFemale == 1, "Female",0))) %>%
+  group_by(Dataset, Gender) %>% 
+  summarise(SampleSize = n()) %>% group_by(Gender) %>% 
+  mutate(Percentage = SampleSize/sum(SampleSize) *100)
+
 ```
-Table 1. Proportion of liver patients by gender.
+Table 1. Percentage of liver patients and non-liver patients by gender.
 
-Because the dataset has more men than women, we computed the proportion of men and women who had liver disease. We noticed that rates of liver disease are higher in men by almost 9 points. 
+Because the dataset has more men than women, we computed the incidence rate of liver disease within each gender. We noticed that rates of liver disease are higher in men compared to women by almost 9 points (73.6% vs 65%). 
 
-To begin, we used an ensemble method that combined 19 different classification methods - lda, naive_bayes, svmLinear, qda, knn, kknn, rpart, rf, ranger, wsrf, Rborist, avNNet, mlp, monmlp, adaboose, gbm, svmRadial, svmRadialCost, and svmRadialSigma.
+##Machine Learning Algorithm
 
-```{r india, include=FALSE}
+```{r ml_setup, include=FALSE}
 set.seed(1)
 ind <- createDataPartition(india$Dataset, times = 1, list = FALSE)
 train <- india[-ind,]
+trainset = train %>% select(-Dataset)
+#################################################################
 test <- india[ind,]
+testset = test %>% select(-Dataset)
+```
+My plan is to analyze the dataset using an ensemble of algorithms applicable to categorical prediction. I then planned to use PCA and re-analyze the dimensionally-reduced dataset using the same ensemble.
 
-model <- c("lda", "naive_bayes", "svmLinear", "qda", 
-            "knn", "kknn", "rpart", "rf", "ranger", "wsrf", 
-            "Rborist", "avNNet", "mlp", "monmlp",
-            "adaboost", "gbm", "svmRadial", 
-            "svmRadialCost", "svmRadialSigma")
+###Analysis without PCA
 
+To begin, we used an ensemble method that combined 6 algorithms applicable to categorical prediction - svmLinear, svmRadial, svmRadialCost, svmRadialSigma, and lda.
+
+```{r ml1, include=FALSE}
+model <- c("svmLinear", "gbm", "svmRadial", "svmRadialCost", 
+           "svmRadialSigma", "lda")
+#################################################################
+#Apply all models to train set#
 set.seed(1)
 fit <- lapply(model, function(model){
+  print(model)
   train(Dataset ~ ., method = model, data = train)
 })
-
 names(fit) <- model
-
+#################################################################
+#Predict test set from train fits#
 pred <- sapply(fit, function(fit){
   predict(fit,test)
 })
-
+#################################################################
+#Create confusion vector#
 c <- c(1:ncol(pred))
 confusionvector <- sapply(c, function(c){
   confusionMatrix(factor(pred[,c]), test$Dataset)$overall["Accuracy"]
-  })
-
-mean(confusionvector)
-
+})
+# mean(confusionvector)
+cv = data.frame(Model=model, Accuracy=confusionvector)
+#################################################################
+#Select majority vote#
 c2 <- c(1:nrow(test))
 mv <- sapply(c2, function(c2){
   m <- majorityVote(pred[c2,])
   m$majority
 })
 pred <- cbind(pred,mv)
-
-cv <- confusionMatrix(factor(pred[,ncol(pred)]), test$Dataset)$overall["Accuracy"]
+#################################################################
+#Create confusion matrix using majority vote#
+cm <- confusionMatrix(factor(pred[,ncol(pred)]), test$Dataset)$overall["Accuracy"]
+# cm
+```
+```{r, echo=FALSE}
 cv
 ```
+Table 2. Accuracy of each algorithm used in the ensemble.
 
-The accuracy of the individual methods were not very high, with lda leading to the highest accuracy (0.72). The ensemble's accuracy was 0.71.
+The accuracy of the individual methods were not very high, with lda leading to the highest accuracy (0.721). The ensemble's average accuracy was `r mean(confusionvector)`. After using the majority vote method to select predictions, the ensemble's accuracy was `r mean(cm)`.
 
-To see if this dataset would benefit from Principal Component Analysis and dimension reduction, we looked at the correlations of the variables to each other.
+###Analysis with PCA
+
+While the dataset does not have a lot of variables to need dimension reduction, I applied dimension reduction to see if it improves accuracy. The ensemble of algorithms remained the same with one exception - lda was removed as PCA had been applied and there was no need for the algorithm to reduce dimensions.
 ```{r, include = FALSE}
-t = india[,1:10] %>% dummy.data.frame(name = "Gender") %>% as.matrix()
+###PCA###
+pca = trainset %>% prcomp()
+pca_sum = summary(pca)
 ```
 ```{r, echo = FALSE}
-cor(t)
+pca_sum
 ```
-Table 2. Correlation matrix of all predictors.
+Table 3. Standard Deviation, Proportion of Variance and Cumulative Proportion explained by each component.
 
-Predictably, the variables concerned with the same components were correlated highly - Bilirubins, Aminotransferases and Albumins. Total Protein was correlated with Albumin as well, but not with the Albumin to Globulin ratio.
+Plotting the Cumulative Proportion of variance we see that the first seven components explain all the variance in the dataset.
 
-We then ran a principal component analysis to observe which variables were principal in categorizing patients. 
+```{r, echo=FALSE}
+plot(pca_sum$importance[3,], xlab="Primary Component", ylab="Cumulative Proportion")
+```
+Figure 1. Cumulative proportion of variance explained by each primary component.
+
+Therefore, I created a pca_train and pca_test set with the first seven primary components and the correponding Dataset labels.
+```{r, include = FALSE}
+###PCA###
+pca_train = data.frame(pca$x[,1:7], Dataset=train$Dataset)
+pca_test = data.frame(prcomp(testset)$x[,1:7], Dataset=test$Dataset)
+```
+Plotting the first three primary components for each dataset, we see a noticeable difference in distribution.
+
+```{r, echo=FALSE}
+pca_train[,c(1,2,3,8)] %>% 
+  gather(Component, Value, PC1:PC3, factor_key=TRUE) %>%
+  ggplot(aes(Dataset, Value, fill = Component))+
+  geom_point(cex=3, pch=21) +
+  coord_cartesian(ylim=c(-1000, 1000)) + 
+  labs(title = "Plot of Top 3 Primary Components and Diagnosis")
+```
+Figure 2. First three primary components for each dataset.
 
 ```{r, include=FALSE}
-pca = train %>% dummy.data.frame(name = "Gender") %>% .[,1:10] %>% prcomp()
-summary(pca)
-```
-Table 3. Variance explained by each principal component.
-
-The first three principal components explain around 99% of the variance, and the first 7 explain all of it.
-
-```{r pressure, echo=FALSE}
-data.frame(pca$x[,1:2], Dataset=train$Dataset) %>% 
-ggplot(aes(PC1,PC2, fill = Dataset))+
-geom_point(cex=3, pch=21) +
-coord_fixed(ratio = 1)+
-labs(title = "Plot of PC1 and PC2")
-```
-Figure 1. Plot of PC1 and PC2.
-
-```{r, echo = FALSE}
-data.frame(pca$x[,2:3], Dataset=train$Dataset) %>% 
-ggplot(aes(PC2,PC3, fill = Dataset))+
-geom_point(cex=3, pch=21) +
-coord_fixed(ratio = 1)+
-labs(title = "Plot of PC2 and PC3")
-```
-Figure 2. Plot of PC2 and PC3.
-
-A combined 3D graph of the top three principal components shows that the is not a sharp demarcation between the liver patients and the non-liver patients.
-```{r}
-data.frame(pca$x[,1:3], Dataset=train$Dataset) %>%
-  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="scatter3d", color=.$Dataset, colors = c("indianred", "turquoise"))
-```
-Figure 3. Plot of PC1, PC2 and PC3.
-
-This explains the overall low accuracy. 
-
-To find out the factors that were confounding our algorithm, we ran our ensemble after removing each column. However, no single column improved the accuracy. Removal of columns 1(Age), 4(Direct_Bilirubin), 6(Alamine_Aminotransferase), 8(Total_Proteins), and 9(Albumin) decidedly lowered accuracy, suggesting that these variables were more important.
-
-```{r, include = FALSE}
-b = c(1:10)
-set.seed(1)
-iter <- sapply(b, function(b){
-  train_b = train[,-b]
-  test_b = test[,-b]
-  set.seed(1)
-  fit <- lapply(model, function(model){
-    train(Dataset ~ ., method = model, data = train_b)})
-  names(fit) <- model
-  pred <- sapply(fit, function(fit){
-    predict(fit,test_b)})
-  c <- c(1:ncol(pred))
-  confusionvector <- sapply(c, function(c){
-    confusionMatrix(factor(pred[,c]), test_b$Dataset)$overall["Accuracy"]})
-  mean(confusionvector)
-  c2 <- c(1:nrow(test_b))
-  mv <- sapply(c2, function(c2){
-    m <- majorityVote(pred[c2,])
-    m$majority})
-  pred <- cbind(pred,mv)
-  confusionMatrix(factor(pred[,ncol(pred)]), test_b$Dataset)$overall["Accuracy"]
-})
-```
-```{r, echo = FALSE}
-names(iter) <- c("Age removed", "Gender removed", "Total_Bilirubin removed", "Direct_Bilirubin removed", 
-                 "Alkaline_Phosphotase removed", "Alamine_Aminotransferase removed", "Aspartate_Aminotransferase removed",
-                 "Total_Proteins removed", "Albumin removed", "Albumin_Globulin_ratio removed")
-iter
-```
-Table 5. Accuracy after each variable is removed.
-
-However, selecting the variables with higher accuracy led to only an extremely minor increase in accuracy, from 0.71 to 0.72.
-```{r, include = FALSE}
-
-india_cleaned = india[,c(1,4,6,8,9,11)]
-train_cleaned = india_cleaned[-ind,]
-test_cleaned = india_cleaned[ind,]
+#################################################################
+###Train using PCA train set###
+pca_model <- c("svmLinear", "gbm", "svmRadial", "svmRadialCost", 
+           "svmRadialSigma")
 
 set.seed(1)
-fit_cleaned <- lapply(model, function(model){
-  train(Dataset ~ ., method = model, data = train_cleaned)
+pca_fit <- lapply(pca_model, function(pca_model){
+  print(pca_model)
+  train(Dataset ~ ., method = pca_model, data = pca_train)
 })
-names(fit_cleaned) <- model
-
-pred_cleaned <- sapply(fit_cleaned, function(fit_cleaned){
-  predict(fit_cleaned,test_cleaned)
+names(pca_fit) <- pca_model
+#################################################################
+#Predict test set from train fits#
+pca_pred <- sapply(pca_fit, function(pca_fit){
+  predict(pca_fit,pca_test)
 })
-
-c3 <- c(1:ncol(pred_cleaned))
-confusionvector_cleaned <- sapply(c3, function(c3){
-  confusionMatrix(factor(pred_cleaned[,c3]), test_cleaned$Dataset)$overall["Accuracy"]
+#################################################################
+#Create confusion vector#
+pca_c <- c(1:ncol(pca_pred))
+pca_confusionvector <- sapply(pca_c, function(pca_c){
+  confusionMatrix(factor(pca_pred[,pca_c]), pca_test$Dataset)$overall["Accuracy"]
 })
-
-mean(confusionvector_cleaned)
-
-c4 <- c(1:nrow(test_cleaned))
-mv_cleaned <- sapply(c4, function(c4){
-  m <- majorityVote(pred[c4,])
+# mean(pca_confusionvector)
+pca_cv = data.frame(Model=pca_model, Accuracy=pca_confusionvector)
+#################################################################
+#Select majority vote#
+pca_c2 <- c(1:nrow(pca_test))
+pca_mv <- sapply(pca_c2, function(pca_c2){
+  m <- majorityVote(pca_pred[pca_c2,])
   m$majority
 })
-pred_cleaned <- cbind(pred_cleaned,mv_cleaned)
-
-cv_cleaned <- confusionMatrix(factor(pred_cleaned[,ncol(pred_cleaned)]), test_cleaned$Dataset)$overall["Accuracy"]
-cv_cleaned
-
+pca_pred <- cbind(pca_pred,pca_mv)
+#################################################################
+#Create confusion matrix using majority vote#
+pca_cm <- confusionMatrix(factor(pca_pred[,ncol(pca_pred)]), pca_test$Dataset)$overall["Accuracy"]
+# pca_cm
 ```
+```{r, echo = FALSE}
+pca_cv
+```
+Table 4. Post-PCA accuracy of each algorithm used in the ensemble.
 
+Unsurprisingly, due to the lower number of dimensions the accuracy did not change much. The mean accuracy of the ensemble was `r mean(pca_confusionvector)` and the accuracy after majority votes was `r mean(pca_cm)`.
 
-Conclusion:
+#Conclusion
 
-Predicting liver disease from comprehensive health information is less accurate than we would hope for, but is nevertheless a useful tool that can be used to ease the burden on healthcare providers.
+Predicting liver disease from comprehensive health information is less accurate than we would hope for, but is nevertheless possible. The high variance within the population with liver disease, as seen in Table 3 and visualized in Figure 2, is likely the reason behind the lower accuracy of machine learning algorithms. Nevertheless, the ability to predict liver disease by 0.714 accuracy can prove to be a useful tool that can be used to ease the burden on healthcare providers.
 
-Acknowledgements:
+#Acknowledgements:
 
 This dataset was downloaded from the UCI ML Repository:
 Lichman, M. (2013). UCI Machine Learning Repository [http://archive.ics.uci.edu/ml]. Irvine, CA: University of California, School of Information and Computer Science.

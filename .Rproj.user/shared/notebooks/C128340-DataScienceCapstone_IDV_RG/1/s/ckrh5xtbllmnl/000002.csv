@@ -1,0 +1,3 @@
+"0","###PCA###"
+"0","pca_train = data.frame(pca$x[,1:7], Dataset=train$Dataset)"
+"0","pca_test = data.frame(prcomp(testset)$x[,1:7], Dataset=test$Dataset)"

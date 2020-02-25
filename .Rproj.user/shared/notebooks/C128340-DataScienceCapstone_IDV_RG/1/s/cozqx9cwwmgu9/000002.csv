@@ -1,0 +1,3 @@
+"0","###PCA###"
+"0","pca = trainset %>% prcomp()"
+"0","pca_sum = summary(pca)"

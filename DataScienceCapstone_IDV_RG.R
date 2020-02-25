@@ -1,56 +1,63 @@
-###Load Packages and Dataset###
+########################################Load Packages########################################
 
 library(tidyverse)
 library(caret)
 library(mclust)
 library(plotly)
+library(dummies)
+
+########################################Load Dataset########################################
 
 india <- read.csv("indian_liver_patient.csv", na.strings = c("", "NA"), stringsAsFactors = FALSE)
-india$Gender = factor(india$Gender, levels = c("Male", "Female"))
-india$Dataset[india$Dataset == 1] = "Liver patient"
-india$Dataset[india$Dataset == 2] = "Non-liver patient"
+india = india %>% dummy.data.frame(name = "Gender") %>% mutate(Dataset = ifelse(Dataset == 1, "Liver patient",
+                                                                                ifelse(Dataset == 2, "Non-liver patient",NA)))
 india$Dataset = factor(india$Dataset, levels = c("Liver patient", "Non-liver patient"))
 india = india[complete.cases(india),]
 
-###Demographic Characteristics###
+########################################Demographic Characteristics########################################
 
-india %>% group_by(Dataset, Gender) %>% 
+india %>% mutate(Gender = ifelse(GenderMale == 1, "Male",
+                                 ifelse(GenderFemale == 1, "Female",0))) %>%
+  group_by(Dataset, Gender) %>% 
   summarise(SampleSize = n()) %>% group_by(Gender) %>% 
-  mutate(Proportion = SampleSize/sum(SampleSize) *100)
+  mutate(Percent = SampleSize/sum(SampleSize) *100)
 
-###Ensemble Classification ML###
+########################################Classification Ensemble ML########################################
+
 #Create test and train sets#
 set.seed(1)
 ind <- createDataPartition(india$Dataset, times = 1, list = FALSE)
 train <- india[-ind,]
+trainset = train %>% select(-Dataset)
+
 test <- india[ind,]
+testset = test %>% select(-Dataset)
 
 #Select models#
-model <- c("lda", "naive_bayes", "svmLinear", "qda", 
-           "knn", "kknn", "rpart", "rf", "ranger", "wsrf", 
-           "Rborist", "avNNet", "mlp", "monmlp",
-           "adaboost", "gbm", "svmRadial", 
-           "svmRadialCost", "svmRadialSigma")
-
+model <- c("svmLinear", "gbm", "svmRadial", "svmRadialCost", 
+           "svmRadialSigma", "lda")
+########################################Train########################################
 #Apply all models to train set#
 set.seed(1)
 fit <- lapply(model, function(model){
+  print(model)
   train(Dataset ~ ., method = model, data = train)
 })
 names(fit) <- model
-
+########################################Predict########################################
 #Predict test set from train fits#
 pred <- sapply(fit, function(fit){
   predict(fit,test)
 })
-
+########################################Confusion Vector########################################
 #Create confusion vector#
 c <- c(1:ncol(pred))
 confusionvector <- sapply(c, function(c){
   confusionMatrix(factor(pred[,c]), test$Dataset)$overall["Accuracy"]
 })
 mean(confusionvector)
-
+cv = data.frame(Model=model, Accuracy=confusionvector)
+########################################Majority Vote########################################
 #Select majority vote#
 c2 <- c(1:nrow(test))
 mv <- sapply(c2, function(c2){
@@ -58,101 +65,73 @@ mv <- sapply(c2, function(c2){
   m$majority
 })
 pred <- cbind(pred,mv)
-
+########################################Confusion Vector Post Majority Vote########################################
 #Create confusion matrix using majority vote#
-cv <- confusionMatrix(factor(pred[,ncol(pred)]), test$Dataset)$overall["Accuracy"]
-cv
+cm <- confusionMatrix(factor(pred[,ncol(pred)]), test$Dataset)$overall["Accuracy"]
+cm
 
-###Check correlation matrix for PCA###
-t = india %>% .[,1:10] %>% dummy.data.frame(name = "Gender") %>% as.matrix()
-cor(t)
+######################################## PCA ########################################
+pca = trainset %>% prcomp()
+pca_sum = summary(pca)
 
-###PCA###
-pca = train %>% dummy.data.frame(name = "Gender") %>% .[,1:10] %>% prcomp()
-summary(pca)
+########################################Plot of Primary Components########################################
 
-###Plot of Primary Components###
-#PC1 & PC2 #
-data.frame(pca$x[,1:2], Dataset=train$Dataset) %>% 
-  ggplot(aes(PC1,PC2, fill = Dataset))+
+#Plot of standard deviation by primary component#
+plot(pca_sum$importance[3,], xlab="Primary Component", ylab="Cumulative Proportion")
+
+#PC1, PC2 & PC3#
+pca_train[,c(1,2,3,8)] %>% 
+  gather(Component, Value, PC1:PC3, factor_key=TRUE) %>%
+  ggplot(aes(Dataset, Value, fill = Component))+
   geom_point(cex=3, pch=21) +
-  coord_fixed(ratio = 1)+
-  labs(title = "Plot of PC1 and PC2")
+  coord_cartesian(ylim=c(-1000, 1000)) + 
+  labs(title = "Plot of Top 3 Primary Components and Diagnosis")
 
-#PC2 & PC3#
-data.frame(pca$x[,2:3], Dataset=train$Dataset) %>% 
-  ggplot(aes(PC2,PC3, fill = Dataset))+
-  geom_point(cex=3, pch=21) +
-  coord_fixed(ratio = 1)+
-  labs(title = "Plot of PC2 and PC3")
+########################################PCA Test and Train Sets########################################
+pca_train = data.frame(pca$x[,1:7], Dataset=train$Dataset)
 
-#PC1, PC2, & PC3#
-data.frame(pca$x[,1:3], Dataset=train$Dataset) %>%
-  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="scatter3d", color=.$Dataset, colors = c("indianred", "turquoise"))
-
-###Run iterations to remove columns###
-b = c(1:10)
-set.seed(1)
-iter <- sapply(b, function(b){
-  train_b = train[,-b]
-  test_b = test[,-b]
-  set.seed(1)
-  fit <- lapply(model, function(model){
-    train(Dataset ~ ., method = model, data = train_b)})
-  names(fit) <- model
-  pred <- sapply(fit, function(fit){
-    predict(fit,test_b)})
-  c <- c(1:ncol(pred))
-  confusionvector <- sapply(c, function(c){
-    confusionMatrix(factor(pred[,c]), test_b$Dataset)$overall["Accuracy"]})
-  mean(confusionvector)
-  c2 <- c(1:nrow(test_b))
-  mv <- sapply(c2, function(c2){
-    m <- majorityVote(pred[c2,])
-    m$majority})
-  pred <- cbind(pred,mv)
-  confusionMatrix(factor(pred[,ncol(pred)]), test_b$Dataset)$overall["Accuracy"]
-})
-
-#Rename iterations#
-names(iter) <- c("Age removed", "Gender removed", "Total_Bilirubin removed", "Direct_Bilirubin removed", 
-                 "Alkaline_Phosphotase removed", "Alamine_Aminotransferase removed", "Aspartate_Aminotransferase removed",
-                 "Total_Proteins removed", "Albumin removed", "Albumin_Globulin_ratio removed")
-iter
-
-###Predicting from cleaned dataset###
-india_cleaned = india[,c(1,4,6,8,9,11)]
-train_cleaned = india_cleaned[-ind,]
-test_cleaned = india_cleaned[ind,]
+pca_test = data.frame(prcomp(testset)$x[,1:7], Dataset=test$Dataset)
+########################################Training Using PCA########################################
+###Train using PCA train set###
+pca_model <- c("svmLinear", "gbm", "svmRadial", "svmRadialCost", 
+           "svmRadialSigma")
 
 set.seed(1)
-fit_cleaned <- lapply(model, function(model){
-  train(Dataset ~ ., method = model, data = train_cleaned)
+pca_fit <- lapply(pca_model, function(pca_model){
+  print(pca_model)
+  train(Dataset ~ ., method = pca_model, data = pca_train)
 })
-names(fit_cleaned) <- model
-
-pred_cleaned <- sapply(fit_cleaned, function(fit_cleaned){
-  predict(fit_cleaned,test_cleaned)
+names(pca_fit) <- pca_model
+########################################Predicting using PCA_Test########################################
+#Predict test set from train fits#
+pca_pred <- sapply(pca_fit, function(pca_fit){
+  predict(pca_fit,pca_test)
 })
-
-c3 <- c(1:ncol(pred_cleaned))
-confusionvector_cleaned <- sapply(c3, function(c3){
-  confusionMatrix(factor(pred_cleaned[,c3]), test_cleaned$Dataset)$overall["Accuracy"]
+########################################Confusion Vector Post-PCA########################################
+#Create confusion vector#
+pca_c <- c(1:ncol(pca_pred))
+pca_confusionvector <- sapply(pca_c, function(pca_c){
+  confusionMatrix(factor(pca_pred[,pca_c]), pca_test$Dataset)$overall["Accuracy"]
 })
-mean(confusionvector_cleaned)
-
-c4 <- c(1:nrow(test_cleaned))
-mv_cleaned <- sapply(c4, function(c4){
-  m <- majorityVote(pred[c4,])
+mean(pca_confusionvector)
+pca_cv = data.frame(Model=pca_model, Accuracy=pca_confusionvector)
+########################################PCA Majority Vote########################################
+#Select majority vote#
+pca_c2 <- c(1:nrow(pca_test))
+pca_mv <- sapply(pca_c2, function(pca_c2){
+  m <- majorityVote(pca_pred[pca_c2,])
   m$majority
 })
-pred_cleaned <- cbind(pred_cleaned,mv_cleaned)
+pca_pred <- cbind(pca_pred,pca_mv)
+########################################Confusion Vector after PCA Majority Vote########################################
+#Create confusion matrix using majority vote#
+pca_cm <- confusionMatrix(factor(pca_pred[,ncol(pca_pred)]), pca_test$Dataset)$overall["Accuracy"]
+pca_cm
 
-cv_cleaned <- confusionMatrix(factor(pred_cleaned[,ncol(pred_cleaned)]), test_cleaned$Dataset)$overall["Accuracy"]
-cv_cleaned
-
-
-
+########################################BONUS 3-D PLOT!########################################
+######PC1, PC2, & PC3#########
+pca_train[,c(1,2,3,12)] %>%
+  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="scatter3d", color=.$Dataset, colors = c("indianred", "turquoise"))
 
 
 

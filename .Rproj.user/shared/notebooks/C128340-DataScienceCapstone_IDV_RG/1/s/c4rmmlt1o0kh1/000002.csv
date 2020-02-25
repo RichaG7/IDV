@@ -1,0 +1,7 @@
+"0","set.seed(1)"
+"0","ind <- createDataPartition(india$Dataset, times = 1, list = FALSE)"
+"0","train <- india[-ind,]"
+"0","trainset = train %>% select(-Dataset)"
+"0","#################################################################"
+"0","test <- india[ind,]"
+"0","testset = test %>% select(-Dataset)"

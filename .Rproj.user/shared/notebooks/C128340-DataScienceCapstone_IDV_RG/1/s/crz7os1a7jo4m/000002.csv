@@ -1,0 +1,6 @@
+"0","pca_train[,c(1,2,3,8)] %>% "
+"0","  gather(Component, Value, PC1:PC3, factor_key=TRUE) %>%"
+"0","  ggplot(aes(Dataset, Value, fill = Component))+"
+"0","  geom_point(cex=3, pch=21) +"
+"0","  coord_cartesian(ylim=c(-1000, 1000)) + "
+"0","  labs(title = ""Plot of Top 3 Primary Components and Diagnosis"")"

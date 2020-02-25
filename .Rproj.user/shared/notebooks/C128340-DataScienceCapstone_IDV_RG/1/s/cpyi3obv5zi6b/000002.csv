@@ -1,0 +1,1 @@
+"0","plot(pca_sum$importance[3,], xlab=""Primary Component"", ylab=""Cumulative Proportion"")"
