@@ -131,7 +131,8 @@ pca_cm
 ########################################BONUS 3-D PLOT!########################################
 ######PC1, PC2, & PC3#########
 pca_train[,c(1,2,3,12)] %>%
-  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="scatter3d", color=.$Dataset, colors = c("indianred", "turquoise"))
+  plot_ly(x=.$PC1, y=.$PC2, z=.$PC3, type="h", angle=plot.angle, color=.$Dataset, pch=20, cex.symbols=2, 
+          col.axis="gray", col.grid="gray", colors = c("indianred", "turquoise"))
 
 
 
